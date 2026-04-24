@@ -206,5 +206,55 @@ def create_tables(cursor, cnx):
                     f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
                 )
 
+    # Ensure legacy databases have all expected transaction_type enum values.
+    cursor.execute(
+        """
+        SELECT COLUMN_TYPE
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'stake_transactions'
+          AND COLUMN_NAME = 'transaction_type'
+        """
+    )
+    enum_row = cursor.fetchone()
+    expected_enum_values = {
+        "INITIAL_STAKE",
+        "BET",
+        "WIN",
+        "LOSS",
+        "ADJUSTMENT",
+        "DEPOSIT",
+        "WITHDRAWAL",
+        "RESET",
+    }
+
+    current_enum_values = set()
+    if enum_row and enum_row[0]:
+        column_type = str(enum_row[0])
+        if column_type.startswith("enum(") and column_type.endswith(")"):
+            inner = column_type[len("enum(") : -1]
+            current_enum_values = {
+                value.strip().strip("'")
+                for value in inner.split(",")
+                if value.strip()
+            }
+
+    if not expected_enum_values.issubset(current_enum_values):
+        cursor.execute(
+            """
+            ALTER TABLE stake_transactions
+            MODIFY COLUMN transaction_type ENUM(
+                'INITIAL_STAKE',
+                'BET',
+                'WIN',
+                'LOSS',
+                'ADJUSTMENT',
+                'DEPOSIT',
+                'WITHDRAWAL',
+                'RESET'
+            ) NOT NULL
+            """
+        )
+
     cnx.commit()
     print("All tables created successfully!")

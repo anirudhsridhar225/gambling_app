@@ -12,7 +12,9 @@ from rich.table import Table
 
 from models.bettingPreferences import BettingPreferencesCreate, BettingPreferencesUpdate
 from models.gambler import GamblerCreate, GamblerPersonalInfoUpdate, GamblerThresholdUpdate
+from models.stakeManagement import TransactionType
 from services.gamblerProfileService import GamblerProfileService
+from services.stakeManagementService import StakeManagementService
 
 console = Console()
 
@@ -138,7 +140,9 @@ def _create_profile(service: GamblerProfileService) -> None:
             preferred_game_type=_prompt_optional_text("Preferred game type (optional)"),
             auto_play_enabled=auto_play_enabled,
             auto_play_max_games=(
-				_to_int(_prompt_required_text("Auto-play max games"), "Auto-play max games") if auto_play_enabled else None
+                _to_int(_prompt_required_text("Auto-play max games"), "Auto-play max games")
+                if auto_play_enabled
+                else None
             ),
             session_loss_limit=_prompt_optional_float("Session loss limit (optional)"),
             session_win_target=_prompt_optional_float("Session win target (optional)"),
@@ -306,7 +310,126 @@ def _deactivate_profile(service: GamblerProfileService) -> None:
         console.print(f"[red]Deactivate failed: {err}[/red]")
 
 
-def run_cli(service: GamblerProfileService) -> None:
+def _prompt_transaction_type(include_all: bool = False) -> TransactionType | None:
+    options = [item.value for item in TransactionType]
+    if include_all:
+        options = ["ALL"] + options
+    choice = Prompt.ask("Transaction type", choices=options, default="ALL" if include_all else options[0])
+    if include_all and choice == "ALL":
+        return None
+    return TransactionType(choice)
+
+
+def _initialize_stake_session(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        starting_stake = _prompt_required_float("Starting stake")
+        lower_limit = _prompt_required_float("Lower limit")
+        upper_limit = _prompt_required_float("Upper limit")
+        max_games_value = _prompt_optional_int("Max games (optional)")
+
+        result = stake_service.initialize_stake_session(
+            gambler_id,
+            starting_stake=starting_stake,
+            lower_limit=lower_limit,
+            upper_limit=upper_limit,
+            max_games=max_games_value,
+        )
+        console.print(Panel.fit(_pretty_json(result), title="Stake Session Initialized"))
+    except Exception as err:
+        console.print(f"[red]Initialize stake session failed: {err}[/red]")
+
+
+def _track_stake(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        result = stake_service.track_current_stake(gambler_id)
+        console.print(Panel.fit(_pretty_json(result), title="Current Stake"))
+    except Exception as err:
+        console.print(f"[red]Track stake failed: {err}[/red]")
+
+
+def _apply_bet_outcome(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        bet_amount = _prompt_required_float("Bet amount")
+        is_win = Confirm.ask("Was the bet a win?", default=False)
+        payout_amount = _prompt_required_float("Payout amount") if is_win else 0.0
+        result = stake_service.apply_bet_outcome(
+            gambler_id,
+            bet_amount=bet_amount,
+            is_win=is_win,
+            payout_amount=payout_amount,
+        )
+        console.print(Panel.fit(_pretty_json(result), title="Bet Outcome Applied"))
+    except Exception as err:
+        console.print(f"[red]Apply bet outcome failed: {err}[/red]")
+
+
+def _monitor_stake(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        result = stake_service.monitor_stake_fluctuations(gambler_id)
+        console.print(Panel.fit(_pretty_json(result), title="Stake Monitor"))
+    except Exception as err:
+        console.print(f"[red]Monitor stake failed: {err}[/red]")
+
+
+def _validate_stake(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        result = stake_service.validate_stake_boundaries(gambler_id)
+        console.print(Panel.fit(_pretty_json(result), title="Stake Validation"))
+    except Exception as err:
+        console.print(f"[red]Validate stake failed: {err}[/red]")
+
+
+def _stake_report(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        session_id = _prompt_optional_int("Session ID (optional)")
+        transaction_type = _prompt_transaction_type(include_all=True)
+        result = stake_service.generate_stake_history_report(
+            gambler_id,
+            session_id=session_id,
+            transaction_type=transaction_type,
+        )
+        console.print(Panel.fit(_pretty_json(result), title="Stake History Report"))
+    except Exception as err:
+        console.print(f"[red]Generate report failed: {err}[/red]")
+
+
+def _deposit_funds(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        amount = _prompt_required_float("Deposit amount")
+        result = stake_service.deposit_funds(gambler_id, amount)
+        console.print(Panel.fit(_pretty_json(result), title="Deposit Recorded"))
+    except Exception as err:
+        console.print(f"[red]Deposit failed: {err}[/red]")
+
+
+def _withdraw_funds(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        amount = _prompt_required_float("Withdrawal amount")
+        result = stake_service.withdraw_funds(gambler_id, amount)
+        console.print(Panel.fit(_pretty_json(result), title="Withdrawal Recorded"))
+    except Exception as err:
+        console.print(f"[red]Withdrawal failed: {err}[/red]")
+
+
+def _adjust_stake(stake_service: StakeManagementService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        amount = _prompt_required_float("Adjustment amount (positive adds, negative subtracts)")
+        result = stake_service.adjust_stake(gambler_id, amount)
+        console.print(Panel.fit(_pretty_json(result), title="Stake Adjusted"))
+    except Exception as err:
+        console.print(f"[red]Adjust stake failed: {err}[/red]")
+
+
+def run_cli(profile_service: GamblerProfileService, stake_service: StakeManagementService) -> None:
     actions = {
         "1": ("Create gambler", _create_profile),
         "2": ("List gamblers", _list_profiles),
@@ -317,6 +440,15 @@ def run_cli(service: GamblerProfileService) -> None:
         "7": ("Reset gambler session", _reset_profile),
         "8": ("Record bet result", _record_bet),
         "9": ("Deactivate account", _deactivate_profile),
+        "10": ("Initialize stake session", _initialize_stake_session),
+        "11": ("Track current stake", _track_stake),
+        "12": ("Apply bet outcome", _apply_bet_outcome),
+        "13": ("Monitor stake fluctuations", _monitor_stake),
+        "14": ("Validate stake boundaries", _validate_stake),
+        "15": ("Generate stake report", _stake_report),
+        "16": ("Deposit funds", _deposit_funds),
+        "17": ("Withdraw funds", _withdraw_funds),
+        "18": ("Adjust stake", _adjust_stake),
         "0": ("Exit", None),
     }
 
@@ -335,4 +467,7 @@ def run_cli(service: GamblerProfileService) -> None:
 
         _, handler = actions[choice]
         if handler:
-            handler(service)
+            if choice in {"1", "2", "3", "4", "5", "6", "7", "8", "9"}:
+                handler(profile_service)
+            else:
+                handler(stake_service)
