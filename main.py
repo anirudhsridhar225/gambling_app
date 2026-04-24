@@ -1,5 +1,6 @@
 import db
 from cli import run_cli
+from services.bettingService import BettingService
 from services.gamblerProfileService import GamblerProfileService
 from services.stakeManagementService import StakeManagementService
 
@@ -9,4 +10,5 @@ if __name__ == "__main__":
 
     profile_service = GamblerProfileService(db.cnx)
     stake_service = StakeManagementService(db.cnx)
-    run_cli(profile_service, stake_service)
+    betting_service = BettingService(db.cnx, stake_service)
+    run_cli(profile_service, stake_service, betting_service)

@@ -4,6 +4,7 @@ import json
 from decimal import Decimal
 from datetime import datetime
 from typing import Any
+import random
 
 from rich.console import Console
 from rich.panel import Panel
@@ -13,6 +14,7 @@ from rich.table import Table
 from models.bettingPreferences import BettingPreferencesCreate, BettingPreferencesUpdate
 from models.gambler import GamblerCreate, GamblerPersonalInfoUpdate, GamblerThresholdUpdate
 from models.stakeManagement import TransactionType
+from services.bettingService import BettingService
 from services.gamblerProfileService import GamblerProfileService
 from services.stakeManagementService import StakeManagementService
 
@@ -353,7 +355,8 @@ def _apply_bet_outcome(stake_service: StakeManagementService) -> None:
     try:
         gambler_id = _prompt_gambler_id()
         bet_amount = _prompt_required_float("Bet amount")
-        is_win = Confirm.ask("Was the bet a win?", default=False)
+        # is_win = Confirm.ask("Was the bet a win?", default=False)
+        is_win = True if (random.random() > 0.5) else False
         payout_amount = _prompt_required_float("Payout amount") if is_win else 0.0
         result = stake_service.apply_bet_outcome(
             gambler_id,
@@ -361,7 +364,10 @@ def _apply_bet_outcome(stake_service: StakeManagementService) -> None:
             is_win=is_win,
             payout_amount=payout_amount,
         )
-        console.print(Panel.fit(_pretty_json(result), title="Bet Outcome Applied"))
+        console.print(Panel.fit(_pretty_json(result), title="Manual Stake Outcome Applied"))
+        console.print(
+            "[yellow]Option 12 records stake transactions only. bet_id/game_id are null unless a bet is placed via options 19-21.[/yellow]"
+        )
     except Exception as err:
         console.print(f"[red]Apply bet outcome failed: {err}[/red]")
 
@@ -429,7 +435,109 @@ def _adjust_stake(stake_service: StakeManagementService) -> None:
         console.print(f"[red]Adjust stake failed: {err}[/red]")
 
 
-def run_cli(profile_service: GamblerProfileService, stake_service: StakeManagementService) -> None:
+def _prompt_strategy_name() -> str:
+    return Prompt.ask(
+        "Strategy",
+        choices=[
+            "fixed",
+            "percentage",
+            "martingale",
+            "reverse_martingale",
+            "fibonacci",
+            "d_alembert",
+        ],
+        default="fixed",
+    )
+
+
+def _prompt_strategy_config(strategy_name: str) -> dict[str, float]:
+    config: dict[str, float] = {}
+    key = strategy_name.strip().lower()
+
+    if key == "fixed":
+        config["amount"] = _prompt_required_float("Fixed bet amount")
+        return config
+
+    if key == "percentage":
+        config["percentage"] = _prompt_required_float("Stake percentage (e.g. 5)")
+        return config
+
+    if key in {"martingale", "reverse_martingale"}:
+        config["base_amount"] = _prompt_required_float("Base bet amount")
+        multiplier = _prompt_optional_float("Multiplier (optional, default 2.0)")
+        if multiplier is not None:
+            config["multiplier"] = multiplier
+        return config
+
+    if key == "fibonacci":
+        config["base_amount"] = _prompt_required_float("Base bet amount")
+        return config
+
+    if key == "d_alembert":
+        config["base_amount"] = _prompt_required_float("Base bet amount")
+        config["step_amount"] = _prompt_required_float("Step amount")
+        return config
+
+    return config
+
+
+def _place_single_bet(betting_service: BettingService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        bet_amount = _prompt_required_float("Bet amount")
+        result = betting_service.place_bet(gambler_id, bet_amount)
+        console.print(Panel.fit(_pretty_json(result), title="Single Bet Result"))
+    except Exception as err:
+        console.print(f"[red]Place single bet failed: {err}[/red]")
+
+
+def _place_strategy_bet(betting_service: BettingService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        strategy_name = _prompt_strategy_name()
+        strategy_config = _prompt_strategy_config(strategy_name)
+        result = betting_service.place_bet_with_strategy(
+            gambler_id=gambler_id,
+            strategy_name=strategy_name,
+            strategy_config=strategy_config,
+        )
+        console.print(Panel.fit(_pretty_json(result), title="Strategy Bet Result"))
+    except Exception as err:
+        console.print(f"[red]Place strategy bet failed: {err}[/red]")
+
+
+def _place_consecutive_bets(betting_service: BettingService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        strategy_name = _prompt_strategy_name()
+        strategy_config = _prompt_strategy_config(strategy_name)
+        number_of_bets = _to_int(_prompt_required_text("Number of bets"), "Number of bets")
+
+        result = betting_service.place_consecutive_bets(
+            gambler_id=gambler_id,
+            strategy_name=strategy_name,
+            number_of_bets=number_of_bets,
+            strategy_config=strategy_config,
+        )
+        console.print(Panel.fit(_pretty_json(result), title="Consecutive Bets Result"))
+    except Exception as err:
+        console.print(f"[red]Place consecutive bets failed: {err}[/red]")
+
+
+def _betting_session_summary(betting_service: BettingService) -> None:
+    try:
+        gambler_id = _prompt_gambler_id()
+        result = betting_service.get_betting_session_summary(gambler_id)
+        console.print(Panel.fit(_pretty_json(result), title="Betting Session Summary"))
+    except Exception as err:
+        console.print(f"[red]Get betting session summary failed: {err}[/red]")
+
+
+def run_cli(
+    profile_service: GamblerProfileService,
+    stake_service: StakeManagementService,
+    betting_service: BettingService,
+) -> None:
     actions = {
         "1": ("Create gambler", _create_profile),
         "2": ("List gamblers", _list_profiles),
@@ -442,13 +550,17 @@ def run_cli(profile_service: GamblerProfileService, stake_service: StakeManageme
         "9": ("Deactivate account", _deactivate_profile),
         "10": ("Initialize stake session", _initialize_stake_session),
         "11": ("Track current stake", _track_stake),
-        "12": ("Apply bet outcome", _apply_bet_outcome),
+        "12": ("Apply manual stake outcome", _apply_bet_outcome),
         "13": ("Monitor stake fluctuations", _monitor_stake),
         "14": ("Validate stake boundaries", _validate_stake),
         "15": ("Generate stake report", _stake_report),
         "16": ("Deposit funds", _deposit_funds),
         "17": ("Withdraw funds", _withdraw_funds),
         "18": ("Adjust stake", _adjust_stake),
+        "19": ("Place single probability bet", _place_single_bet),
+        "20": ("Place strategy bet", _place_strategy_bet),
+        "21": ("Place consecutive strategy bets", _place_consecutive_bets),
+        "22": ("Betting session summary", _betting_session_summary),
         "0": ("Exit", None),
     }
 
@@ -469,5 +581,7 @@ def run_cli(profile_service: GamblerProfileService, stake_service: StakeManageme
         if handler:
             if choice in {"1", "2", "3", "4", "5", "6", "7", "8", "9"}:
                 handler(profile_service)
-            else:
+            elif choice in {"10", "11", "12", "13", "14", "15", "16", "17", "18"}:
                 handler(stake_service)
+            else:
+                handler(betting_service)

@@ -19,6 +19,7 @@ class StakeManagementService:
         self._lock = RLock()
         self._supported_db_transaction_types = self._load_supported_transaction_types()
         self._has_transaction_ref = self._column_exists("stake_transactions", "transaction_ref")
+        self._has_transaction_created_at = self._column_exists("stake_transactions", "created_at")
 
     def _column_exists(self, table_name: str, column_name: str) -> bool:
         cursor = self.cnx.cursor()
@@ -159,6 +160,7 @@ class StakeManagementService:
         game_id: int | None = None,
     ) -> StakeTransaction:
         db_type = self._normalize_transaction_type(transaction_type)
+        created_at = None
         if self._has_transaction_ref:
             cursor.execute(
                 """
@@ -211,6 +213,17 @@ class StakeManagementService:
                     balance_after,
                 ),
             )
+
+        transaction_id = cursor.lastrowid
+        if self._has_transaction_created_at:
+            cursor.execute(
+                "SELECT created_at FROM stake_transactions WHERE transaction_id = %s",
+                (transaction_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                created_at = row[0]
+
         return StakeTransaction(
             gambler_id=gambler_id,
             session_id=session_id,
@@ -218,9 +231,10 @@ class StakeManagementService:
             amount=amount,
             balance_before=balance_before,
             balance_after=balance_after,
-            transaction_id=cursor.lastrowid,
+            transaction_id=transaction_id,
             bet_id=bet_id,
             game_id=game_id,
+            created_at=created_at,
         )
 
     def initialize_stake_session(

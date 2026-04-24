@@ -74,6 +74,7 @@ def create_tables(cursor, cnx):
     CREATE_BETTING_STRATEGIES_TABLE = """CREATE TABLE IF NOT EXISTS betting_strategies (
         strategy_id TINYINT PRIMARY KEY AUTO_INCREMENT,
         strategy_name VARCHAR(255) NOT NULL,
+        strategy_code VARCHAR(20),
         strategy_type ENUM('FIXED', 'PERCENTAGE', 'RANDOM') NOT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -97,6 +98,7 @@ def create_tables(cursor, cnx):
         session_id BIGINT NOT NULL,
         gambler_id BIGINT NOT NULL,
         strategy_id TINYINT,
+        game_index INT,
         bet_amount DECIMAL(10, 2) NOT NULL,
         win_probability DECIMAL(5, 4),
         odds_type ENUM('FIXED', 'AMERICAN', 'DECIMAL', 'PROBABILITY') NOT NULL,
@@ -186,6 +188,9 @@ def create_tables(cursor, cnx):
             "total_losses": "BIGINT NOT NULL DEFAULT 0",
             "total_winnings": "BIGINT NOT NULL DEFAULT 0",
         },
+        "betting_strategies": {
+            "strategy_code": "VARCHAR(20) NULL",
+        },
     }
 
     for table_name, columns in required_columns.items():
@@ -252,6 +257,42 @@ def create_tables(cursor, cnx):
                 'DEPOSIT',
                 'WITHDRAWAL',
                 'RESET'
+            ) NOT NULL
+            """
+        )
+
+    # Ensure betting_strategies table has all expected strategy_type enum values.
+    cursor.execute(
+        """
+        SELECT COLUMN_TYPE
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'betting_strategies'
+          AND COLUMN_NAME = 'strategy_type'
+        """
+    )
+    strategy_type_row = cursor.fetchone()
+    expected_strategy_types = {"FIXED", "PERCENTAGE", "RANDOM"}
+
+    current_strategy_types = set()
+    if strategy_type_row and strategy_type_row[0]:
+        column_type = str(strategy_type_row[0])
+        if column_type.startswith("enum(") and column_type.endswith(")"):
+            inner = column_type[len("enum(") : -1]
+            current_strategy_types = {
+                value.strip().strip("'")
+                for value in inner.split(",")
+                if value.strip()
+            }
+
+    if not expected_strategy_types.issubset(current_strategy_types):
+        cursor.execute(
+            """
+            ALTER TABLE betting_strategies
+            MODIFY COLUMN strategy_type ENUM(
+                'FIXED',
+                'PERCENTAGE',
+                'RANDOM'
             ) NOT NULL
             """
         )
